@@ -71,6 +71,11 @@ public class SearchActivity extends AppCompatActivity {
 
                 List<Pair<BluetoothDevice, Integer>> list = bluetoothDeviceAdapter.getData();
 
+
+                if (TextUtils.isEmpty(bluetoothDevice.getName()) || !bluetoothDevice.getName().startsWith("Hud_")) {
+                    return;
+                }
+
                 for (Pair<BluetoothDevice, Integer> pair : list) {
                     if (TextUtils.equals(bluetoothDevice.getAddress(), pair.first.getAddress())) {
                         return;

@@ -46,12 +46,30 @@
             />
 
         <Button
+            android:id="@+id/disconnect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="8dp"
+            android:text="断开连接"
+            />
+
+        <Button
+            android:id="@+id/send_heart"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="8dp"
+            android:text="发送心跳包"
+            />
+
+        <Button
             android:id="@+id/send_navigation"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_margin="8dp"
             android:text="发送导航信息"
             />
+
+
     </LinearLayout>
 
 </ScrollView>

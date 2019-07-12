@@ -1,5 +1,6 @@
 package com.ke.hud_bluetooth_java;
 
+import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
 import android.content.BroadcastReceiver;
@@ -20,6 +21,7 @@ import com.orhanobut.logger.Logger;
 
 import java.io.OutputStream;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import io.reactivex.Observable;
 import io.reactivex.Scheduler;
@@ -36,6 +38,9 @@ public class ConnectActivity extends AppCompatActivity {
 
     private BluetoothDevice mBluetoothDevice;
 
+
+    private final BluetoothAdapter mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+
     private ImageView mDeviceState;
 
     @Nullable
@@ -43,9 +48,19 @@ public class ConnectActivity extends AppCompatActivity {
 
     private CompositeDisposable mCompositeDisposable = new CompositeDisposable();
 
+
+    @Nullable
+    private Disposable sendHeartDisposable;
+
+    @Nullable
+    private Disposable sendNavigationDisposable;
+
     private BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+
+
+            Logger.d("action = " + intent.getAction());
 
             if (BluetoothDevice.ACTION_ACL_CONNECTED.equals(intent.getAction())) {
                 mDeviceState.setImageResource(R.drawable.ic_bluetooth_connected_green_500_24dp);
@@ -83,15 +98,23 @@ public class ConnectActivity extends AppCompatActivity {
         findViewById(R.id.connect).setOnClickListener(v -> connectDevice());
 
         findViewById(R.id.send_navigation).setOnClickListener(v -> sendNavigation());
+
+        findViewById(R.id.disconnect).setOnClickListener(v -> disconnect());
+
+        findViewById(R.id.send_heart).setOnClickListener(v -> sendHeart());
+
     }
 
 
     private void connectDevice() {
+
+
         Disposable disposable = Observable.just(1)
                 .observeOn(Schedulers.io())
-                .map(integer -> {
+                .map(integer -> mBluetoothAdapter.getRemoteDevice(mBluetoothDevice.getAddress()))
+                .map(device -> {
 
-                    mBluetoothSocket = mBluetoothDevice.createRfcommSocketToServiceRecord(mUUID);
+                    mBluetoothSocket = device.createRfcommSocketToServiceRecord(mUUID);
 
                     Logger.d("创建socket成功");
 
@@ -99,7 +122,7 @@ public class ConnectActivity extends AppCompatActivity {
 
                     Logger.d("连接完成");
 
-                    return integer;
+                    return 1;
                 }).subscribe(integer -> Logger.d("连接成功"), throwable -> {
                     Logger.d("连接失败");
                     throwable.printStackTrace();
@@ -108,16 +131,81 @@ public class ConnectActivity extends AppCompatActivity {
     }
 
 
-    private void sendNavigation() {
-        DJBTManager.getInstance().getSender().sendNavigationInformationWithDirection(3, 1000, "当前道路", "下一个道路", 100, 1000, 66, new SendByteData() {
-            @Override
-            public void byteData(byte[] bytes) {
+    private void disconnect() {
+        Disposable disposable = Observable.just(1)
+                .map(integer -> {
 
-                sendDate(bytes);
-            }
-        });
+                    if (mBluetoothSocket != null && mBluetoothSocket.isConnected()) {
+                        mBluetoothSocket.close();
+
+                        return true;
+                    }
+
+                    return false;
+                }).subscribe(aBoolean -> Logger.d("断开连接结果 = " + aBoolean), throwable -> {
+                    Logger.d("断开连接失败");
+                    throwable.printStackTrace();
+                });
+
+        mCompositeDisposable.add(disposable);
     }
 
+
+    /**
+     * 发送心跳包
+     */
+    private void sendHeart() {
+//        DJBTManager.getInstance().getSender().sentHeart(this::sendDate);
+
+
+        if (sendHeartDisposable != null) {
+            sendHeartDisposable.dispose();
+        }
+
+        sendHeartDisposable = Observable.interval(0, 5, TimeUnit.SECONDS)
+                .observeOn(Schedulers.io())
+                .subscribe(aLong -> {
+                    Logger.d("开始发送心跳包 已发送个数 = " + aLong);
+                    DJBTManager.getInstance().getSender().sentHeart(ConnectActivity.this::sendDate);
+
+
+                }, throwable -> {
+                    Logger.d("循环发送心跳包数据失败");
+                    throwable.printStackTrace();
+                });
+
+    }
+
+    private void sendNavigation() {
+//        DJBTManager.getInstance().getSender().sendNavigationInformationWithDirection(3, 1000, "当前道路", "下一个道路", 100, 1000, 66, new SendByteData() {
+//            @Override
+//            public void byteData(byte[] bytes) {
+//
+//                sendDate(bytes);
+//            }
+//        });
+
+        if (sendNavigationDisposable != null) {
+            sendNavigationDisposable.dispose();
+        }
+
+        sendNavigationDisposable = Observable.interval(2, TimeUnit.SECONDS)
+                .observeOn(Schedulers.io())
+                .subscribe(aLong -> DJBTManager.getInstance().getSender().sendNavigationInformationWithDirection(3, aLong.intValue(), "当前道路", "下一个道路", 100, 1000, 66, bytes -> {
+                    Logger.d("开始发送导航数据");
+
+                    sendDate(bytes);
+                }), throwable -> {
+                    Logger.d("循环发送导航数据失败");
+                    throwable.printStackTrace();
+                });
+    }
+
+    /**
+     * 发送数据包到蓝牙
+     *
+     * @param bytes 要发送的数据包
+     */
     private void sendDate(byte[] bytes) {
         Disposable disposable = Observable.just(1)
                 .observeOn(Schedulers.io())
@@ -126,6 +214,10 @@ public class ConnectActivity extends AppCompatActivity {
 
                     if (mBluetoothSocket == null) {
                         Logger.d("没有socket连接");
+                        return false;
+                    } else if (!mBluetoothSocket.isConnected()) {
+                        Logger.d("socket已经断开");
+                        return false;
                     } else {
                         OutputStream outputStream = mBluetoothSocket.getOutputStream();
 
@@ -134,7 +226,7 @@ public class ConnectActivity extends AppCompatActivity {
 
 
                     return true;
-                }).subscribe(aBoolean -> Logger.d("数据发送成功"), throwable -> {
+                }).subscribe(aBoolean -> Logger.d("数据发送结果 " + aBoolean), throwable -> {
                     Logger.d("数据发送失败");
                     throwable.printStackTrace();
                 });
@@ -149,5 +241,14 @@ public class ConnectActivity extends AppCompatActivity {
         unregisterReceiver(mBroadcastReceiver);
 
         mCompositeDisposable.dispose();
+
+
+        if (sendHeartDisposable != null) {
+            sendHeartDisposable.dispose();
+        }
+
+        if (sendNavigationDisposable != null) {
+            sendNavigationDisposable.dispose();
+        }
     }
 }
